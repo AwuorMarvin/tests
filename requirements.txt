@@ -1,6 +1,6 @@
 Flask==2.0.3
 requests==2.26.0
-numpy==1.21.2
+numpy=>1.26
 streamlit
 PyPDF2
 python-docx
