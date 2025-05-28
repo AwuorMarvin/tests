@@ -17,6 +17,6 @@ def load_data(file_path):
         print(f"Error loading data: {e}")
         return None
 df = load_data('sales_data_sample.csv')
-print(df.iloc[0:5,[0,1]])  # Example of accessing a specific cell
+print(df['PRODUCTLINE'])  # Example of accessing a specific cell
 
     

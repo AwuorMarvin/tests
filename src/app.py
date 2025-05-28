@@ -3,10 +3,13 @@ import PyPDF2
 import docx
 import re
 from collections import Counter
-import matplotlib.pyplot as plt
-import seaborn as sns
 import pandas as pd
 import numpy as np
+import plotly.express as px
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+
+
 
 # Function to extract text from PDF
 def extract_text_from_pdf(file):
@@ -34,9 +37,9 @@ def extract_text_from_docx(file):
 
 # Function to process uploaded file based on type
 def process_file(uploaded_file):
-    if uploaded_file.name.endswith('.pdf'):
+    if uploaded_file.name.lower().endswith('.pdf'):
         return extract_text_from_pdf(uploaded_file)
-    elif uploaded_file.name.endswith(('.docx', '.doc')):
+    elif uploaded_file.name.lower().endswith(('.docx', '.doc')):
         return extract_text_from_docx(uploaded_file)
     else:
         st.error("Unsupported file format. Please upload a PDF or Word document.")
@@ -44,23 +47,28 @@ def process_file(uploaded_file):
 
 # Function for letter frequency distribution
 def letter_frequency_analysis(text):
-    letters = [char.lower() for char in text if char.isalpha()]
-    letter_counts = Counter(letters)
-    df = pd.DataFrame.from_dict(letter_counts, orient='index', columns=['Count']).sort_index()
+    lower_counts = Counter(char for char in text if char.islower())
+    upper_counts = Counter(char for char in text if char.isupper())
+    all_letters = [chr(i) for i in range(ord('a'), ord('z') + 1)]
+    data = {
+        'Letter': all_letters,
+        'Lowercase': [lower_counts.get(letter, 0) for letter in all_letters],
+        'Uppercase': [upper_counts.get(letter.upper(), 0) for letter in all_letters]
+    }
+    df = pd.DataFrame(data)
     return df
 
 # Function for paragraph word count analysis
 def paragraph_word_count_analysis(text):
-    paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
+    paragraphs = [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
     word_counts = [len(re.findall(r'\b\w+\b', para)) for para in paragraphs]
     return paragraphs, word_counts
 
 # Function for number distribution analysis (single digits 0-9)
 def number_distribution_analysis(text):
-    numbers = [char for char in text if char.isdigit()]
-    number_counts = Counter(numbers)
-    all_digits = {str(i): 0 for i in range(10)}
-    all_digits.update(number_counts)
+    digits = re.findall(r'\b[0-9]\b', text)
+    digit_counts = Counter(digits)
+    all_digits = {str(i): digit_counts.get(str(i), 0) for i in range(10)}
     df = pd.DataFrame.from_dict(all_digits, orient='index', columns=['Count']).sort_index()
     return df
 
@@ -76,129 +84,201 @@ def main():
     st.title("Document Analysis App")
     st.write("Upload a PDF or Word document to analyze its content.")
 
-    # File uploader
     uploaded_file = st.file_uploader("Choose a file", type=['pdf', 'docx', 'doc'])
 
     if uploaded_file is not None:
-        # Extract text
         text = process_file(uploaded_file)
         
         if text:
             st.subheader("Extracted Text Preview")
             st.text_area("Text", text[:500] + "..." if len(text) > 500 else text, height=200)
 
-            # Letter Frequency Distribution
-            st.subheader("Letter Frequency Distribution")
-            letter_df = letter_frequency_analysis(text)
-            if not letter_df.empty:
-                fig, ax = plt.subplots()
-                sns.barplot(x=letter_df.index, y=letter_df['Count'], ax=ax)
-                plt.title("Letter Frequency Distribution")
-                plt.xlabel("Letter")
-                plt.ylabel("Count")
-                st.pyplot(fig)
-            else:
-                st.write("No letters found in the document.")
-
-            # Paragraph Word Count Analysis
-            st.subheader("Paragraph Word Count Analysis")
+            # --- Document Summary ---
+            st.subheader("Document Summary")
+            # Calculate metrics
+            words = re.findall(r'\b[a-zA-Z]+\b', text)  # Only alphabetic words, exclude numbers
+            total_words = len(words)
             paragraphs, word_counts = paragraph_word_count_analysis(text)
-            if word_counts:
-                df = pd.DataFrame({'Paragraph': [f"Para {i+1}" for i in range(len(paragraphs))], 'Word Count': word_counts})
-                st.dataframe(df)
-                
-                # Paragraph Length Visualization (Histogram)
-                st.subheader("Paragraph Length Distribution")
+            total_paragraphs = len(paragraphs)
+            total_characters = len(text)
+            avg_reading_speed = 200  # words per minute (average adult)
+            reading_time = total_words / avg_reading_speed
+            reading_time = max(1, int(round(reading_time)))  # At least 1 minute
+
+            # Display metrics as cards
+            card1, card2, card3, card4 = st.columns(4, gap="large")
+            card1.metric("Total Words", f"{total_words:,}")
+            card2.metric("Total Paragraphs", f"{total_paragraphs:,}")
+            card3.metric("Total Characters", f"{total_characters:,}")
+            card4.metric("Est. Reading Time (min)", f"{reading_time}")
+
+            # --- Paragraph Word Count Analysis & Sentiment Analysis per Paragraph ---
+            st.subheader("Paragraph Analysis")
+            col1, col2 = st.columns(2, gap="large")
+
+            with col1:
+               
+                paragraphs, word_counts = paragraph_word_count_analysis(text)
                 if word_counts:
-                    # Define bins (1-10, 11-20, 21-30, etc.)
-                    max_count = max(word_counts, default=10)
-                    bin_edges = np.arange(0, max_count + 11, 10)  # Bins: 0-10, 11-20, etc.
-                    fig, ax = plt.subplots()
-                    sns.histplot(word_counts, bins=bin_edges, kde=False, ax=ax)
-                    plt.title("Paragraph Length Distribution (Word Counts)")
-                    plt.xlabel("Word Count Range")
-                    plt.ylabel("Number of Paragraphs")
-                    # Customize x-axis labels to show ranges
-                    bin_labels = [f"{int(bin_edges[i])}–{int(bin_edges[i+1])}" for i in range(len(bin_edges)-1)]
-                    ax.set_xticks(bin_edges[:-1])  # Set ticks at left edge of bins
-                    ax.set_xticklabels(bin_labels, rotation=45)
-                    st.pyplot(fig)
+                    df = pd.DataFrame({'Paragraph': [f"Para {i+1}" for i in range(len(paragraphs))], 'Word Count': word_counts})
+                    st.dataframe(df)
+                    # Paragraph Length Visualization (Histogram) using Altair
+                    import altair as alt
+                    hist_df = pd.DataFrame({'Word Count': word_counts})
+                    hist_chart = alt.Chart(hist_df).mark_bar().encode(
+                        alt.X('Word Count:Q', bin=alt.Bin(maxbins=20)),
+                        y='count()'
+                    ).properties(title="Paragraph Length Distribution (Word Counts)", width=400, height=300)
+                    st.altair_chart(hist_chart, use_container_width=False)
                 else:
                     st.write("No paragraphs found in the document.")
-            else:
-                st.write("No paragraphs found in the document.")
-            # Paragraph Word Count Analysis
-            st.subheader("Paragraph Word Count Analysis")
-            paragraphs, word_counts = paragraph_word_count_analysis(text)
-            # --- Sentiment Analysis Section ---
-            from textblob import TextBlob
 
-            st.subheader("Sentiment Analysis per Paragraph")
+            with col2:
+                
+                from textblob import TextBlob
+                if 'paragraphs' not in locals():
+                    paragraphs, _ = paragraph_word_count_analysis(text)
+                if paragraphs:
+                    sentiment_data = []
+                    sentiment_labels = []
+                    for i, para in enumerate(paragraphs):
+                        blob = TextBlob(para)
+                        polarity = blob.sentiment.polarity
+                        if polarity > 0.1:
+                            sentiment = "Positive"
+                        elif polarity < -0.1:
+                            sentiment = "Negative"
+                        else:
+                            sentiment = "Neutral"
+                        sentiment_data.append({
+                            "Paragraph": f"Para {i+1}",
+                            "Polarity Score": polarity,
+                            "Sentiment": sentiment
+                        })
+                        sentiment_labels.append(sentiment)
+                    sentiment_df = pd.DataFrame(sentiment_data)
+                    st.dataframe(sentiment_df)
+                else:
+                    st.info("No paragraphs found for sentiment analysis.")
 
-            if paragraphs:
-                sentiment_data = []
-                sentiment_labels = []
+            # --- Letter Frequency Distribution & Special Character Distribution ---
+            st.subheader("Character Analysis")
+            col3, col4 = st.columns(2, gap="large")
 
-                for i, para in enumerate(paragraphs):
-                    blob = TextBlob(para)
-                    polarity = blob.sentiment.polarity
-                    if polarity > 0.1:
-                        sentiment = "Positive"
-                    elif polarity < -0.1:
-                        sentiment = "Negative"
-                    else:
-                        sentiment = "Neutral"
-                    sentiment_data.append({
-                        "Paragraph": f"Para {i+1}",
-                        "Polarity Score": polarity,
-                        "Sentiment": sentiment
-                    })
-                    sentiment_labels.append(sentiment)
+            with col3:
+                letter_df = letter_frequency_analysis(text)
+                if not letter_df.empty:
+                    # Prepare data for grouped bar chart: one x-axis, two bars per letter
+                    letter_chart = pd.melt(
+                        letter_df,
+                        id_vars=['Letter'],
+                        value_vars=['Lowercase', 'Uppercase'],
+                        var_name='Case',
+                        value_name='Count'
+                    )
+                    import altair as alt
+                    chart = alt.Chart(letter_chart).mark_bar().encode(
+                        x=alt.X('Letter:N', title='Letter'),
+                        y=alt.Y('Count:Q', title='Count'),
+                        color=alt.Color('Case:N', scale=alt.Scale(domain=['Lowercase', 'Uppercase'], range=['blue', 'red'])),
+                        tooltip=['Letter', 'Case', 'Count']
+                    ).properties(
+                        title="Letter Frequency Distribution (Lowercase vs Uppercase)",
+                        width=400,
+                        height=300
+                    )
+                    st.altair_chart(chart, use_container_width=False)
+                else:
+                    st.write("No letters found in the document.")
 
-                sentiment_df = pd.DataFrame(sentiment_data)
-                st.dataframe(sentiment_df)
+            with col4:
+               
+                special_df = special_character_analysis(text)
+                if not special_df.empty:
+                    special_df = special_df.reset_index().rename(columns={'index': 'Character'})
+                    chart = px.bar(special_df, x='Character', y='Count', title="Special Character Distribution", width=400, height=300)
+                    st.plotly_chart(chart, use_container_width=False)
+                else:
+                    st.write("No special characters found in the document.")
 
-                # --- Sentiment Distribution Pie Chart ---
-                st.subheader("Sentiment Distribution Overview")
-                sentiment_counts = pd.Series(sentiment_labels).value_counts().sort_index()
-                fig, ax = plt.subplots()
-                ax.pie(sentiment_counts, labels=sentiment_counts.index, autopct='%1.1f%%',
-                    colors=['#66bb6a', '#ff7043', '#ffee58'])  # green, red, yellow
-                ax.set_title("Overall Sentiment Distribution")
-                st.pyplot(fig)
-            else:
-                st.info("No paragraphs found for sentiment analysis.")
+            # --- Number Distribution Analysis & Sentiment Distribution Donut Chart ---
+            st.subheader("Number & Sentiment Overview")
+            col5, col6 = st.columns(2, gap="large")
 
+            with col5:
+                
+                number_df = number_distribution_analysis(text)
+                if not number_df.empty:
+                    number_df = number_df.reset_index().rename(columns={'index': 'Digit'})
+                    chart = px.bar(number_df, x='Digit', y='Count', title="Digit Distribution (0-9)", width=400, height=300)
+                    st.plotly_chart(chart, use_container_width=False)
+                else:
+                    st.write("No digits found in the document.")
 
+            with col6:
+                
+                if 'sentiment_labels' not in locals():
+                    # If not already calculated, do it now
+                    paragraphs, _ = paragraph_word_count_analysis(text)
+                    from textblob import TextBlob
+                    sentiment_labels = []
+                    for para in paragraphs:
+                        blob = TextBlob(para)
+                        polarity = blob.sentiment.polarity
+                        if polarity > 0.1:
+                            sentiment = "Positive"
+                        elif polarity < -0.1:
+                            sentiment = "Negative"
+                        else:
+                            sentiment = "Neutral"
+                        sentiment_labels.append(sentiment)
+                if sentiment_labels:
+                    sentiment_counts = pd.Series(sentiment_labels).value_counts().sort_index()
+                    fig = px.pie(
+                        names=sentiment_counts.index,
+                        values=sentiment_counts.values,
+                        title="Overall Sentiment Distribution",
+                        hole=0.5,  # This makes it a donut chart
+                        color_discrete_sequence=[ '#ffee58','#66bb6a', '#ff7043',]
+                    )
+                    st.plotly_chart(fig, use_container_width=False)
+                else:
+                    st.info("No paragraphs found for sentiment analysis.")
 
+            # --- Word Cloud and Top Words Table ---
+            st.subheader("Word Cloud & Top Words")
+            wc_col, tbl_col = st.columns(2, gap="large")
 
-            # Number Distribution Analysis
-            st.subheader("Number Distribution Analysis (Digits 0-9)")
-            number_df = number_distribution_analysis(text)
-            if not number_df.empty:
-                fig, ax = plt.subplots()
-                sns.barplot(x=number_df.index, y=number_df['Count'], ax=ax)
-                plt.title("Digit Distribution (0-9)")
-                plt.xlabel("Digit")
-                plt.ylabel("Count")
-                plt.xticks(rotation=0)
-                st.pyplot(fig)
-            else:
-                st.write("No digits found in the document.")
+            # Tokenize and count word frequencies (exclude numbers)
+            words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
+            word_counts = Counter(words)
+            most_common_words = word_counts.most_common(20)
 
-            # Special Character Analysis
-            st.subheader("Special Character Analysis")
-            special_df = special_character_analysis(text)
-            if not special_df.empty:
-                fig, ax = plt.subplots()
-                sns.barplot(x=special_df.index, y=special_df['Count'], ax=ax)
-                plt.title("Special Character Distribution")
-                plt.xlabel("Character")
-                plt.ylabel("Count")
-                plt.xticks(rotation=45)
-                st.pyplot(fig)
-            else:
-                st.write("No special characters found in the document.")
+            # Slider to select number of words in word cloud/table
+            num_words = st.slider("Number of words to display", min_value=5, max_value=20, value=10, step=1)
+
+            # Prepare data for word cloud and table
+            top_words = dict(most_common_words[:num_words])
+
+            with wc_col:
+                st.markdown("**Word Cloud**")
+                if top_words:
+                    wc = WordCloud(width=400, height=300, background_color='white', colormap='tab20',
+                                   max_words=num_words).generate_from_frequencies(top_words)
+                    fig, ax = plt.subplots(figsize=(4, 3))
+                    ax.imshow(wc, interpolation='bilinear')
+                    ax.axis("off")
+                    st.pyplot(fig)
+                else:
+                    st.write("Not enough words for word cloud.")
+
+            with tbl_col:
+                st.markdown("**Top Words Table**")
+                if top_words:
+                    df_top_words = pd.DataFrame(list(top_words.items()), columns=['Word', 'Frequency'])
+                    st.dataframe(df_top_words, use_container_width=True)
+                else:
+                    st.write("Not enough words for table.")
 
 if __name__ == "__main__":
     main()
