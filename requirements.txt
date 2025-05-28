@@ -2,8 +2,12 @@ Flask==2.0.3
 requests==2.26.0
 numpy==1.21.2
 streamlit
-pandas
-matplotlib
-seaborn
 PyPDF2
 python-docx
+pandas
+numpy
+plotly
+wordcloud
+matplotlib
+altair
+textblob
